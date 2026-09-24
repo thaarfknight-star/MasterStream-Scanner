@@ -1,0 +1,28 @@
+MasterStream Scanner — Source-Available License
+Copyright (c) 2026 thaarfknight-star. All rights reserved.
+
+The source code of this project is published for transparency and
+reference purposes only. This is NOT an open-source license.
+
+PERMITTED
+  You may view and read the source code.
+
+PROHIBITED
+  Without prior written permission from the copyright holder, you may NOT:
+    - copy, reproduce, or redistribute the source code or any part of it;
+    - modify, adapt, merge, or create derivative works based on it;
+    - use the source code, in whole or in part, in any other software;
+    - decompile or reverse-engineer the distributed builds to obtain
+      reusable source beyond what is published here.
+
+  Running the official distributed builds (e.g. MasterStreamScanner-Setup.exe
+  from the project's GitHub Releases) for their intended purpose is allowed.
+
+NO WARRANTY
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+  OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
