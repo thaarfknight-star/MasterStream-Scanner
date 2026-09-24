@@ -5,19 +5,18 @@
 برنامه‌ای برای پیدا کردن بهترین سرور مستراستریم جهت استریم روی Kick.
 
 قابلیت‌ها:
-  - لیست پیش‌فرض همه سرورهای مستراستریم (۶ سرور ایران، ۳ سرور آلمان، ۲ سرور خروجی)
-  - دکمه «اسکن»: تست پینگ و اتصال TCP به پورت RTMP با اینترنت خود شما
-  - رتبه‌بندی سرورها و پیشنهاد بهترین سرور ایران برای استریم روی Kick
-  - افزودن / ویرایش / حذف سرور (حتی سرورهای پیش‌فرض)
-  - درون‌ریزی گروهی آدرس‌ها از پنل مستراستریم
+  - تست موازی همه سرورها (پینگ + اتصال TCP به پورت RTMP) با اینترنت خود شما
+  - تشخیص خودکار نام و منطقه سرور از روی لینک RTMP
+  - رتبه‌بندی سرورها و پیشنهاد بهترین سرور برای استریم روی Kick
+  - افزودن / ویرایش / حذف سرور
+  - درون‌ریزی گروهی آدرس‌ها
+  - تم تیره / روشن / سیستمی
+  - بررسی خودکار آپدیت از گیت‌هاب و نصب نسخه جدید
   - ذخیره خودکار در فایل servers.json کنار برنامه
 
-اجرا:
+اجرا از سورس:
     pip install PySide6
     python masterstream_scanner.py
-
-نکته: آدرس دقیق سرورها (هاست RTMP) عمومی نیست و فقط داخل پنل کاربری
-مستراستریم نمایش داده می‌شود؛ یک‌بار از پنل کپی کنید و در برنامه وارد کنید.
 """
 
 import json
@@ -26,24 +25,32 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
-import uuid
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
-    QPushButton, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout,
-    QWidget, QHeaderView, QAbstractItemView,
+    QProgressDialog, QPushButton, QTableWidget, QTableWidgetItem, QTextEdit,
+    QVBoxLayout, QWidget, QHeaderView, QAbstractItemView,
 )
 
 # ----------------------------------------------------------------------------
 # ثابت‌ها
 # ----------------------------------------------------------------------------
+
+__version__ = "1.0.0"
+GITHUB_OWNER = "thaarfknight-star"
+GITHUB_REPO = "MasterStream-Scanner"
+UPDATE_API = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
 APP_NAME = "اسکنر سرور مستراستریم"
 APP_SUBTITLE = "بهترین سرور را برای استریم روی Kick پیدا کن"
@@ -51,25 +58,11 @@ DATA_FILE = Path(__file__).resolve().parent / "servers.json"
 DEFAULT_RTMP_PORT = 1935
 
 REGION_IRAN = "ایران"
-REGION_EU = "اروپا"
-REGION_OUT = "خروجی"
+REGION_UNKNOWN = "نامشخص"
+REGIONS = ["ایران", "آلمان", "فرانسه", "هلند", "انگلیس", "ترکیه", "امارات", REGION_UNKNOWN]
 
-# سرورهای پیش‌فرض — از مخزن رسمی مانیتورینگ مستراستریم
-# (github.com/masterking32/masterstream_uptime)
-# هاست‌ها خالی‌اند چون عمومی نیستند؛ از پنل کاربری کپی کنید.
-DEFAULT_SERVERS = [
-    ("ایران ۱ — نور", REGION_IRAN, "Noor"),
-    ("ایران ۲ — آسیاتک", REGION_IRAN, "AsiaTech"),
-    ("ایران ۳ — مبین", REGION_IRAN, "Mobin IDC"),
-    ("ایران ۴ — شیراز", REGION_IRAN, "ITC Shiraz"),
-    ("ایران ۵ — سیستک", REGION_IRAN, "Systec"),
-    ("ایران ۶ — فناپ", REGION_IRAN, "Fanap"),
-    ("آلمان ۱", REGION_EU, "Germany"),
-    ("آلمان ۲", REGION_EU, "Germany"),
-    ("آلمان ۳", REGION_EU, "Germany"),
-    ("خروجی آلمان ۱", REGION_OUT, "Forward"),
-    ("خروجی فرانسه ۱", REGION_OUT, "Forward"),
-]
+# لیست سرورها خالی شروع می‌شود؛ کاربر از پنل مستراستریم وارد می‌کند.
+DEFAULT_SERVERS = []
 
 
 # ----------------------------------------------------------------------------
@@ -78,217 +71,303 @@ DEFAULT_SERVERS = [
 
 @dataclass
 class Server:
-    id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
-    name: str = ""
-    region: str = REGION_IRAN
+    name: str
     host: str = ""
     port: int = DEFAULT_RTMP_PORT
-    rtmp_url: str = ""
+    region: str = REGION_UNKNOWN
     note: str = ""
+    id: str = field(default_factory=lambda: uuid4short())
 
 
-def default_server_list():
-    return [
-        Server(name=name, region=region, host="", port=DEFAULT_RTMP_PORT,
-               rtmp_url="", note=provider)
-        for name, region, provider in DEFAULT_SERVERS
-    ]
+def uuid4short():
+    import uuid as _uuid
+    return _uuid.uuid4().hex[:8]
 
 
-def load_servers():
-    """خواندن لیست سرورها از فایل؛ اگر نبود، پیش‌فرض‌ها ساخته می‌شود."""
-    if DATA_FILE.exists():
-        try:
-            data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-            return [Server(**s) for s in data.get("servers", [])]
-        except Exception:
-            pass
-    servers = default_server_list()
-    save_servers(servers)
-    return servers
+def server_rtmp_url(s):
+    if isinstance(s, dict):
+        host, port = s.get("host", ""), s.get("port", DEFAULT_RTMP_PORT)
+    else:
+        host, port = s.host, s.port
+    if not host:
+        return ""
+    return f"rtmp://{host}:{port}/live"
 
 
-def save_servers(servers):
-    DATA_FILE.write_text(
-        json.dumps({"servers": [asdict(s) for s in servers]},
-                   ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+# ----------------------------------------------------------------------------
+# تشخیص خودکار نام و منطقه از روی هاست
+# ----------------------------------------------------------------------------
+
+def suggest_name(host: str) -> str:
+    """نام پیشنهادی از روی هاست؛ مثلاً ir1.example.com -> IR1"""
+    host = (host or "").strip().lower()
+    if not host:
+        return ""
+    if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+        return "سرور " + host
+    label = host.split(".")[0]
+    label = re.sub(r"[-_]+", " ", label).strip()
+    return label.upper() if label else host
 
 
-def parse_rtmp_url(url):
-    """از آدرس کامل RTMP، هاست و پورت را جدا می‌کند."""
-    url = (url or "").strip()
-    if not url:
+_REGION_RULES = [
+    (REGION_IRAN, ("ir",), ("iran", "tehran", "shiraz", "tabriz", "mashhad",
+                            "isfahan", "karaj", "ahvaz", "qom")),
+    ("آلمان", ("de",), ("germany", "berlin", "frankfurt", "munich", "nuremberg", "falkenstein")),
+    ("فرانسه", ("fr",), ("france", "paris", "marseille", "roubaix", "gravelines")),
+    ("هلند", ("nl",), ("netherlands", "amsterdam", "rotterdam")),
+    ("انگلیس", ("uk",), ("england", "london", "manchester")),
+    ("ترکیه", ("tr",), ("turkey", "istanbul", "ankara")),
+    ("امارات", ("ae",), ("uae", "dubai", "emirates")),
+]
+
+
+def detect_region(host: str) -> str:
+    """حدس منطقه از روی هاست (کد کشور، TLD یا نام شهر)."""
+    h = (host or "").strip().lower()
+    if not h:
+        return REGION_UNKNOWN
+    tokens = [t for t in re.split(r"[.\-_]", h) if t]
+    tld = tokens[-1] if tokens else ""
+    for region, tlds, words in _REGION_RULES:
+        if tld in tlds:
+            return region
+        for tok in tokens:
+            if tok in words:
+                return region
+            m = re.fullmatch(r"(ir|de|fr|nl|uk|tr|ae)(\d+)?", tok)
+            if m:
+                code = m.group(1)
+                for r2, tlds2, _w2 in _REGION_RULES:
+                    if code in tlds2:
+                        return r2
+    return REGION_UNKNOWN
+
+
+def parse_rtmp(text):
+    """برگرداندن (host, port) از یک RTMP URL یا host تنها."""
+    text = (text or "").strip()
+    if not text:
         return "", DEFAULT_RTMP_PORT
-    if "://" not in url:
-        url = "rtmp://" + url
+    if "://" not in text:
+        text = "rtmp://" + text
     try:
-        p = urlparse(url)
-        host = p.hostname or ""
-        port = p.port or DEFAULT_RTMP_PORT
+        u = urlparse(text)
+        host = u.hostname or ""
+        port = u.port or DEFAULT_RTMP_PORT
         return host, port
     except Exception:
         return "", DEFAULT_RTMP_PORT
 
 
 # ----------------------------------------------------------------------------
-# تست شبکه
+# تست شبکه — بدون باز شدن پنجره CMD، همه سرورها موازی
 # ----------------------------------------------------------------------------
 
-def ping_host(host, count=3, timeout=1):
-    """پینگ با دستور سیستمی؛ خروجی: (میانگین میلی‌ثانیه، درصد افت)"""
-    system = platform.system()
-    if system == "Windows":
-        cmd = ["ping", "-n", str(count), "-w", str(int(timeout * 1000)), host]
+def _popen_kwargs():
+    """روی ویندوز پنجره کنسول باز نشود."""
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        return {"startupinfo": si, "creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
+def ping_host(host, count=2, timeout_ms=1500):
+    """میانگین پینگ (ms) و درصد packet loss. بدون نمایش پنجره."""
+    if not host:
+        return None, 100.0
+    system = platform.system().lower()
+    if system == "windows":
+        cmd = ["ping", "-n", str(count), "-w", str(timeout_ms), host]
     else:
-        cmd = ["ping", "-c", str(count), "-W", str(timeout), host]
+        cmd = ["ping", "-c", str(count), "-W", str(max(1, timeout_ms // 1000)), host]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=count * (timeout + 1) + 10)
+                              timeout=count * (timeout_ms / 1000) + 5,
+                              **_popen_kwargs())
         out = proc.stdout or ""
+        times = [float(x) for x in re.findall(r"time[=<](\d+(?:\.\d+)?)\s*ms", out)]
+        loss_m = re.search(r"(\d+)%\s*(?:packet\s*)?loss", out, re.IGNORECASE)
+        if not loss_m:
+            loss_m = re.search(r"Lost\s*=\s*\d+\s*\((\d+)%", out)
+        loss = float(loss_m.group(1)) if loss_m else (0.0 if times else 100.0)
+        avg = sum(times) / len(times) if times else None
+        return avg, loss
     except Exception:
-        return None, None
-
-    loss = None
-    m = re.search(r"(\d+(?:\.\d+)?)% packet loss", out)
-    if m:
-        loss = float(m.group(1))
-    else:
-        m = re.search(r"Lost = \d+ \((\d+)% loss\)", out)
-        if m:
-            loss = float(m.group(1))
-
-    avg = None
-    m = re.search(r"Average = (\d+)ms", out)
-    if m:
-        avg = float(m.group(1))
-    else:
-        m = re.search(r"rtt [^=]*=\s*[\d.]+/([\d.]+)/", out)
-        if m:
-            avg = float(m.group(1))
-    return avg, loss
+        return None, 100.0
 
 
-def tcp_probe(host, port, attempts=3, timeout=3):
-    """میانگین زمان برقراری اتصال TCP به پورت؛ None یعنی unreachable."""
-    times = []
-    for _ in range(attempts):
+def tcp_probe(host, port, timeout=3.0):
+    """زمان برقراری اتصال TCP به پورت RTMP (ms) یا None."""
+    if not host:
+        return None
+    try:
         t0 = time.perf_counter()
-        try:
-            s = socket.create_connection((host, port), timeout=timeout)
-            s.close()
-            times.append((time.perf_counter() - t0) * 1000.0)
-        except Exception:
+        with socket.create_connection((host, int(port)), timeout=timeout):
             pass
-    if not times:
+        return (time.perf_counter() - t0) * 1000.0
+    except Exception:
         return None
-    return sum(times) / len(times)
 
 
-def score_server(ping_avg, loss, tcp_avg):
-    """امتیاز کمتر = بهتر. None یعنی سرور در دسترس نیست."""
-    if tcp_avg is None:
-        return None
-    base = tcp_avg * 0.7 + (ping_avg if ping_avg is not None else tcp_avg) * 0.3
-    if loss:
-        base += loss * 2.0
-    return base
+def probe_server(server):
+    """تست کامل یک سرور؛ نتیجه دیکشنری."""
+    s = dict(server)
+    ping_ms, loss = ping_host(s.get("host", ""))
+    tcp_ms = tcp_probe(s.get("host", ""), s.get("port", DEFAULT_RTMP_PORT))
+    ok = tcp_ms is not None
+    if not ok:
+        score = 1_000_000.0
+    else:
+        base = tcp_ms if tcp_ms is not None else 9999.0
+        score = base + (ping_ms or 500.0) * 0.3 + loss * 20.0
+    return {
+        "id": s.get("id"), "name": s.get("name"), "region": s.get("region"),
+        "host": s.get("host"), "port": s.get("port"),
+        "ping_ms": ping_ms, "loss": loss, "tcp_ms": tcp_ms,
+        "ok": ok, "score": score,
+    }
 
 
-# ----------------------------------------------------------------------------
-# ورکر اسکن (در ترد جدا)
-# ----------------------------------------------------------------------------
+class ScanThread(QThread):
+    """اسکن موازی همه سرورها؛ نتیجه هر سرور جدا emit می‌شود."""
+    one_done = Signal(int, dict)   # index, result
+    all_done = Signal(list)
 
-class ScanWorker(QObject):
-    progress = Signal(int, str)      # درصد، پیام
-    server_done = Signal(str, dict)  # id سرور، نتیجه
-    finished = Signal()
-
-    def __init__(self, servers):
-        super().__init__()
+    def __init__(self, servers, parent=None):
+        super().__init__(parent)
         self.servers = servers
-        self._stop = False
 
-    @Slot()
     def run(self):
-        total = len(self.servers)
-        for i, srv in enumerate(self.servers):
-            if self._stop:
-                break
-            self.progress.emit(int(i / max(total, 1) * 100), f"در حال تست: {srv.name}")
-            result = {"ping": None, "loss": None, "tcp": None, "score": None,
-                      "ok": False}
-            if srv.host.strip():
+        results = [None] * len(self.servers)
+        if not self.servers:
+            self.all_done.emit([])
+            return
+        with ThreadPoolExecutor(max_workers=min(32, len(self.servers))) as ex:
+            futs = {ex.submit(probe_server, s): i for i, s in enumerate(self.servers)}
+            for fut in as_completed(futs):
+                i = futs[fut]
                 try:
-                    ping_avg, loss = ping_host(srv.host.strip())
-                    tcp_avg = tcp_probe(srv.host.strip(), srv.port)
-                    result.update(ping=ping_avg, loss=loss, tcp=tcp_avg,
-                                  score=score_server(ping_avg, loss, tcp_avg),
-                                  ok=tcp_avg is not None)
+                    res = fut.result()
                 except Exception:
-                    pass
-            self.server_done.emit(srv.id, result)
-        self.progress.emit(100, "تمام شد")
-        self.finished.emit()
-
-    def stop(self):
-        self._stop = True
+                    res = {"id": self.servers[i].get("id"), "ok": False,
+                           "ping_ms": None, "loss": 100.0, "tcp_ms": None,
+                           "score": 1_000_000.0, "name": self.servers[i].get("name"),
+                           "region": self.servers[i].get("region"),
+                           "host": self.servers[i].get("host"),
+                           "port": self.servers[i].get("port")}
+                results[i] = res
+                self.one_done.emit(i, res)
+        self.all_done.emit(results)
 
 
 # ----------------------------------------------------------------------------
-# استایل تیره گیمینگ
+# تم‌ها
 # ----------------------------------------------------------------------------
 
 DARK_QSS = """
-* { font-family: "Vazirmatn", "Segoe UI", "Tahoma"; font-size: 13px; }
-QMainWindow, QWidget#central { background: #0f1115; }
-QLabel { color: #e8eaed; }
-QLabel#title { font-size: 22px; font-weight: bold; color: #ffffff; }
-QLabel#subtitle { font-size: 12px; color: #9aa0a6; }
-QLabel#banner {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0d3b26, stop:1 #0f2f22);
-    border: 1px solid #00e676; border-radius: 10px;
-    padding: 12px; font-size: 14px; font-weight: bold; color: #d7ffe9;
-}
-QPushButton {
-    background: #1c2028; color: #e8eaed;
-    border: 1px solid #2c313b; border-radius: 8px; padding: 9px 16px;
-}
-QPushButton:hover { background: #242a35; border-color: #3a424f; }
-QPushButton:disabled { color: #6b7280; background: #16191f; }
-QPushButton#scanBtn {
-    background: #00c853; color: #ffffff; font-weight: bold; font-size: 14px;
-    border: none; padding: 11px 26px;
-}
-QPushButton#scanBtn:hover { background: #00e676; }
-QPushButton#scanBtn:disabled { background: #1d3a2a; color: #6b7280; }
-QPushButton#dangerBtn { border-color: #5a2b2b; color: #ff8a80; }
-QPushButton#dangerBtn:hover { background: #3a1d1d; }
-QTableWidget {
-    background: #14171d; color: #e8eaed; gridline-color: #232833;
-    border: 1px solid #232833; border-radius: 10px;
-    selection-background-color: #1f3a2c;
-}
+QMainWindow, QWidget { background-color: #0f1419; color: #e8f5e9; }
+QLabel#title { font-size: 22px; font-weight: bold; color: #00e676; }
+QLabel#subtitle { font-size: 12px; color: #9e9e9e; }
+QLabel#banner { font-size: 14px; font-weight: bold; color: #0f1419;
+    background-color: #00e676; border-radius: 8px; padding: 8px; }
+QPushButton { background-color: #1b5e20; color: #ffffff; border: none;
+    border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: bold; }
+QPushButton:hover { background-color: #2e7d32; }
+QPushButton:disabled { background-color: #37474f; color: #90a4ae; }
+QPushButton#danger { background-color: #b71c1c; }
+QPushButton#danger:hover { background-color: #d32f2f; }
+QPushButton#ghost { background-color: #263238; }
+QPushButton#ghost:hover { background-color: #37474f; }
+QLineEdit, QTextEdit, QComboBox { background-color: #1c262c; color: #e8f5e9;
+    border: 1px solid #37474f; border-radius: 6px; padding: 7px; font-size: 13px; }
+QTableWidget { background-color: #131a20; gridline-color: #263238;
+    border: 1px solid #263238; border-radius: 8px; font-size: 13px; }
 QTableWidget::item { padding: 6px; }
-QHeaderView::section {
-    background: #1c2028; color: #9aa0a6; border: none;
-    padding: 8px; font-weight: bold;
-}
-QProgressBar {
-    background: #1c2028; border: 1px solid #2c313b; border-radius: 8px;
-    text-align: center; color: #e8eaed; height: 18px;
-}
-QProgressBar::chunk { background: #00e676; border-radius: 6px; }
-QLineEdit, QTextEdit, QComboBox {
-    background: #14171d; color: #e8eaed;
-    border: 1px solid #2c313b; border-radius: 8px; padding: 8px;
-}
-QComboBox QAbstractItemView { background: #1c2028; color: #e8eaed; }
-QDialog { background: #0f1115; }
-QLabel#hint { color: #9aa0a6; font-size: 11px; }
+QHeaderView::section { background-color: #1b5e20; color: white;
+    padding: 8px; font-weight: bold; border: none; }
+QProgressBar { border: 1px solid #37474f; border-radius: 6px; background: #1c262c;
+    text-align: center; color: #e8f5e9; height: 18px; }
+QProgressBar::chunk { background-color: #00e676; border-radius: 5px; }
+QDialog { background-color: #0f1419; }
+QCheckBox { font-size: 13px; }
 """
+
+LIGHT_QSS = """
+QMainWindow, QWidget { background-color: #f4f6f4; color: #1b2b1e; }
+QLabel#title { font-size: 22px; font-weight: bold; color: #1b7a2e; }
+QLabel#subtitle { font-size: 12px; color: #6b7a6e; }
+QLabel#banner { font-size: 14px; font-weight: bold; color: #ffffff;
+    background-color: #1b7a2e; border-radius: 8px; padding: 8px; }
+QPushButton { background-color: #1b7a2e; color: #ffffff; border: none;
+    border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: bold; }
+QPushButton:hover { background-color: #239a3a; }
+QPushButton:disabled { background-color: #b9c6bb; color: #6b7a6e; }
+QPushButton#danger { background-color: #c62828; }
+QPushButton#danger:hover { background-color: #e53935; }
+QPushButton#ghost { background-color: #dde5de; color: #1b2b1e; }
+QPushButton#ghost:hover { background-color: #cdd8ce; }
+QLineEdit, QTextEdit, QComboBox { background-color: #ffffff; color: #1b2b1e;
+    border: 1px solid #b9c6bb; border-radius: 6px; padding: 7px; font-size: 13px; }
+QTableWidget { background-color: #ffffff; gridline-color: #dde5de;
+    border: 1px solid #cdd8ce; border-radius: 8px; font-size: 13px; }
+QTableWidget::item { padding: 6px; }
+QHeaderView::section { background-color: #1b7a2e; color: white;
+    padding: 8px; font-weight: bold; border: none; }
+QProgressBar { border: 1px solid #b9c6bb; border-radius: 6px; background: #e7ede7;
+    text-align: center; color: #1b2b1e; height: 18px; }
+QProgressBar::chunk { background-color: #1b7a2e; border-radius: 5px; }
+QDialog { background-color: #f4f6f4; }
+QCheckBox { font-size: 13px; }
+"""
+
+THEMES = {"dark": "تیره", "light": "روشن", "system": "سیستمی"}
+
+
+def resolve_theme(theme):
+    if theme == "system":
+        try:
+            from PySide6.QtCore import QOperatingSystemVersion  # noqa
+            hints = QApplication.instance().styleHints()
+            scheme = hints.colorScheme()
+            from PySide6.QtCore import Qt as _Qt
+            return "dark" if scheme == _Qt.ColorScheme.Dark else "light"
+        except Exception:
+            return "light"
+    return theme if theme in ("dark", "light") else "dark"
+
+
+def apply_theme(theme):
+    app = QApplication.instance()
+    if app is None:
+        return
+    app.setStyleSheet(DARK_QSS if resolve_theme(theme) == "dark" else LIGHT_QSS)
+
+
+# ----------------------------------------------------------------------------
+# بررسی آپدیت از گیت‌هاب
+# ----------------------------------------------------------------------------
+
+def _ver_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+
+
+def fetch_latest_release():
+    req = urllib.request.Request(
+        UPDATE_API,
+        headers={"User-Agent": "MasterStreamScanner",
+                 "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def find_setup_asset(release):
+    for a in release.get("assets", []):
+        name = (a.get("name") or "").lower()
+        if name.endswith("setup.exe"):
+            return a
+    return None
 
 
 # ----------------------------------------------------------------------------
@@ -298,370 +377,431 @@ QLabel#hint { color: #9aa0a6; font-size: 11px; }
 class ServerDialog(QDialog):
     def __init__(self, parent=None, server=None):
         super().__init__(parent)
-        self.setWindowTitle("ویرایش سرور" if server else "افزودن سرور")
-        self.setMinimumWidth(420)
-        self.setStyleSheet(DARK_QSS)
+        self.setWindowTitle("افزودن سرور" if server is None else "ویرایش سرور")
+        self.setMinimumWidth(430)
+        self._name_touched = server is not None
 
-        layout = QVBoxLayout(self)
+        layout = QFormLayout(self)
+        layout.setSpacing(10)
 
-        hint = QLabel(
-            "💡 آدرس RTMP را از پنل مستراستریم کپی کنید؛ هاست و پورت خودکار جدا می‌شود.\n"
-            "مثال: rtmp://ir3.masterstream.ir:1935/live"
-        )
-        hint.setObjectName("hint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self.name_edit = QLineEdit(server.name if server else "")
+        self.name_edit.setPlaceholderText("مثلاً IR1")
+        self.name_edit.textEdited.connect(lambda _t: setattr(self, "_name_touched", True))
 
-        form = QFormLayout()
-        self.name_edit = QLineEdit()
-        self.region_combo = QComboBox()
-        self.region_combo.addItems([REGION_IRAN, REGION_EU, REGION_OUT])
-        self.rtmp_edit = QLineEdit()
-        self.rtmp_edit.setPlaceholderText("rtmp://host:1935/live")
-        self.rtmp_edit.setAlignment(Qt.AlignLeft)
-        self.host_edit = QLineEdit()
-        self.host_edit.setAlignment(Qt.AlignLeft)
-        self.port_edit = QLineEdit()
-        self.port_edit.setAlignment(Qt.AlignLeft)
-        self.note_edit = QLineEdit()
-
-        # با تایپ آدرس کامل، هاست/پورت خودکار پر شود
-        self.rtmp_edit.textChanged.connect(self._autofill)
-
-        form.addRow("نام سرور:", self.name_edit)
-        form.addRow("منطقه:", self.region_combo)
-        form.addRow("آدرس کامل RTMP:", self.rtmp_edit)
-        form.addRow("هاست:", self.host_edit)
-        form.addRow("پورت:", self.port_edit)
-        form.addRow("توضیح:", self.note_edit)
-        layout.addLayout(form)
-
+        self.url_edit = QLineEdit()
         if server:
-            self.name_edit.setText(server.name)
-            self.region_combo.setCurrentText(server.region)
-            self.rtmp_edit.setText(server.rtmp_url)
-            self.host_edit.setText(server.host)
-            self.port_edit.setText(str(server.port))
-            self.note_edit.setText(server.note)
+            self.url_edit.setText(server_rtmp_url(server))
+        self.url_edit.setPlaceholderText("rtmp://host:1935/live")
+        self.url_edit.setLayoutDirection(Qt.LeftToRight)
+        self.url_edit.textChanged.connect(self.on_url_changed)
+
+        self.region_combo = QComboBox()
+        self.region_combo.addItems(REGIONS)
+        if server:
+            idx = self.region_combo.findText(server.region)
+            self.region_combo.setCurrentIndex(idx if idx >= 0 else REGIONS.index(REGION_UNKNOWN))
+
+        self.note_edit = QLineEdit(server.note if server else "")
+        self.note_edit.setPlaceholderText("توضیح اختیاری")
+
+        hint = QLabel("نام و منطقه به‌صورت خودکار از روی لینک حدس زده می‌شوند؛\nمی‌توانید دستی هم تغییرشان دهید.")
+        hint.setStyleSheet("color: #9e9e9e; font-size: 11px;")
+        hint.setWordWrap(True)
+
+        layout.addRow("نام سرور:", self.name_edit)
+        layout.addRow("آدرس RTMP:", self.url_edit)
+        layout.addRow("منطقه:", self.region_combo)
+        layout.addRow("توضیح:", self.note_edit)
+        layout.addRow(hint)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("تأیید")
         buttons.button(QDialogButtonBox.Cancel).setText("انصراف")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addRow(buttons)
 
-    def _autofill(self, text):
-        host, port = parse_rtmp_url(text)
-        if host:
-            self.host_edit.setText(host)
-            self.port_edit.setText(str(port))
+    def on_url_changed(self, text):
+        host, _port = parse_rtmp(text)
+        if not host:
+            return
+        if not self._name_touched:
+            self.name_edit.setText(suggest_name(host))
+        region = detect_region(host)
+        idx = self.region_combo.findText(region)
+        if idx >= 0:
+            self.region_combo.setCurrentIndex(idx)
 
-    def get_server(self, server=None):
-        srv = server or Server()
-        srv.name = self.name_edit.text().strip() or "سرور جدید"
-        srv.region = self.region_combo.currentText()
-        srv.rtmp_url = self.rtmp_edit.text().strip()
-        srv.host = self.host_edit.text().strip()
-        try:
-            srv.port = int(self.port_edit.text().strip() or DEFAULT_RTMP_PORT)
-        except ValueError:
-            srv.port = DEFAULT_RTMP_PORT
-        srv.note = self.note_edit.text().strip()
-        return srv
+    def get_server(self, existing=None):
+        host, port = parse_rtmp(self.url_edit.text())
+        name = self.name_edit.text().strip() or suggest_name(host) or "سرور"
+        region = self.region_combo.currentText()
+        note = self.note_edit.text().strip()
+        if existing:
+            existing.name, existing.host, existing.port = name, host, port
+            existing.region, existing.note = region, note
+            return existing
+        return Server(name=name, host=host, port=port, region=region, note=note)
 
-
-# ----------------------------------------------------------------------------
-# دیالوگ درون‌ریزی گروهی
-# ----------------------------------------------------------------------------
 
 class ImportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("درون‌ریزی گروهی سرورها")
-        self.setMinimumSize(480, 360)
-        self.setStyleSheet(DARK_QSS)
+        self.setWindowTitle("درون‌ریزی گروهی")
+        self.setMinimumSize(480, 320)
         layout = QVBoxLayout(self)
-
-        hint = QLabel(
-            "هر خط یک سرور، با این قالب:\n"
-            "نام سرور | rtmp://host:1935/live\n\n"
-            "مثال:\nایران ۳ — مبین | rtmp://ir3.example.ir:1935/live"
-        )
-        hint.setObjectName("hint")
-        layout.addWidget(hint)
-
+        hint = QLabel("هر خط یک سرور، با قالب:\nنام سرور | rtmp://host:1935/live")
+        hint.setStyleSheet("color: #9e9e9e; font-size: 12px;")
+        hint.setWordWrap(True)
         self.text = QTextEdit()
-        self.text.setAlignment(Qt.AlignLeft)
+        self.text.setPlaceholderText("IR1 | rtmp://ir1.example.com:1935/live\nDE1 | rtmp://de1.example.com:1935/live")
+        self.text.setLayoutDirection(Qt.LeftToRight)
+        layout.addWidget(hint)
         layout.addWidget(self.text)
-
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("افزودن همه")
+        buttons.button(QDialogButtonBox.Ok).setText("وارد کردن")
         buttons.button(QDialogButtonBox.Cancel).setText("انصراف")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def get_servers(self):
-        servers = []
+        out = []
         for line in self.text.toPlainText().splitlines():
             line = line.strip()
             if not line or "|" not in line:
                 continue
             name, url = [p.strip() for p in line.split("|", 1)]
-            host, port = parse_rtmp_url(url)
-            region = REGION_IRAN if re.search(r"ایران|iran|ir\d", name + url,
-                                             re.IGNORECASE) else REGION_EU
-            servers.append(Server(name=name or host, region=region,
-                                  host=host, port=port, rtmp_url=url))
-        return servers
+            host, port = parse_rtmp(url)
+            if not host:
+                continue
+            region = detect_region(host)
+            out.append(Server(name=name or suggest_name(host), host=host,
+                              port=port, region=region))
+        return out
+
+
+# ----------------------------------------------------------------------------
+# دیالوگ تنظیمات
+# ----------------------------------------------------------------------------
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent, theme, auto_check):
+        super().__init__(parent)
+        self.setWindowTitle("تنظیمات")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("تیره", "dark")
+        self.theme_combo.addItem("روشن", "light")
+        self.theme_combo.addItem("سیستمی", "system")
+        idx = self.theme_combo.findData(theme)
+        self.theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        form.addRow("تم برنامه:", self.theme_combo)
+
+        self.auto_check_box = QCheckBox("بررسی خودکار آپدیت هنگام اجرای برنامه")
+        self.auto_check_box.setChecked(auto_check)
+        form.addRow(self.auto_check_box)
+        layout.addLayout(form)
+
+        upd_box = QVBoxLayout()
+        ver_label = QLabel(f"نسخه فعلی برنامه: <b>{__version__}</b>")
+        self.upd_status = QLabel("")
+        self.upd_status.setWordWrap(True)
+        self.upd_status.setStyleSheet("font-size: 12px; color: #9e9e9e;")
+        check_btn = QPushButton("بررسی آپدیت")
+        check_btn.setObjectName("ghost")
+        check_btn.clicked.connect(self.on_check_update)
+        upd_box.addWidget(ver_label)
+        upd_box.addWidget(check_btn)
+        upd_box.addWidget(self.upd_status)
+        layout.addLayout(upd_box)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("ذخیره")
+        buttons.button(QDialogButtonBox.Cancel).setText("انصراف")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def on_check_update(self):
+        self.upd_status.setText("در حال بررسی…")
+        parent = self.parent()
+        if parent and hasattr(parent, "check_for_updates"):
+            parent.check_for_updates(manual=True, status_label=self.upd_status)
+
+    def values(self):
+        return self.theme_combo.currentData(), self.auto_check_box.isChecked()
+
+
+# ----------------------------------------------------------------------------
+# دیالوگ آپدیت جدید
+# ----------------------------------------------------------------------------
+
+class UpdateDialog(QDialog):
+    def __init__(self, parent, release):
+        super().__init__(parent)
+        tag = release.get("tag_name", "")
+        self.setWindowTitle("نسخه جدید موجود است")
+        self.setMinimumSize(460, 340)
+        layout = QVBoxLayout(self)
+        title = QLabel(f"نسخه <b>{tag}</b> منتشر شده است (نسخه شما: {__version__})")
+        title.setWordWrap(True)
+        body = QTextEdit()
+        body.setReadOnly(True)
+        body.setPlainText(release.get("body") or "—")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("تغییرات:"))
+        layout.addWidget(body)
+        row = QHBoxLayout()
+        dl_btn = QPushButton("دانلود و نصب")
+        later_btn = QPushButton("بعداً")
+        later_btn.setObjectName("ghost")
+        dl_btn.clicked.connect(self.accept)
+        later_btn.clicked.connect(self.reject)
+        row.addWidget(dl_btn)
+        row.addWidget(later_btn)
+        layout.addLayout(row)
+        self.release = release
 
 
 # ----------------------------------------------------------------------------
 # پنجره اصلی
 # ----------------------------------------------------------------------------
 
-COLS = ["وضعیت", "نام سرور", "منطقه", "هاست", "پینگ", "افت بسته", "اتصال TCP", "امتیاز"]
-
-
 class MainWindow(QMainWindow):
+    update_found = Signal(dict)
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} — انتخاب بهترین سرور برای Kick")
-        self.resize(920, 620)
-        self.setStyleSheet(DARK_QSS)
-
-        self.servers = load_servers()
-        self.results = {}          # id -> result dict
+        self.setWindowTitle(f"{APP_NAME} v{__version__}")
+        self.resize(880, 620)
+        self.servers = []
+        self.theme = "dark"
+        self.auto_check_update = True
         self.scan_thread = None
-        self.scan_worker = None
+        self.last_results = {}
+        self.update_found.connect(self.on_update_found)
+        self.load_settings()
+        apply_theme(self.theme)
+        self.build_ui()
+        self.refresh_table()
+        if self.auto_check_update:
+            QTimer.singleShot(2500, lambda: self.check_for_updates(manual=False))
 
+    # -- ذخیره‌سازی ---------------------------------------------------------
+    def load_settings(self):
+        try:
+            data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            items = data.get("servers", []) if isinstance(data, dict) else data
+            self.servers = [Server(**{k: v for k, v in s.items()
+                                      if k in Server.__dataclass_fields__})
+                            for s in items]
+            if isinstance(data, dict):
+                self.theme = data.get("theme", "dark")
+                self.auto_check_update = data.get("auto_check_update", True)
+        except Exception:
+            self.servers = [Server(**s) for s in DEFAULT_SERVERS]
+
+    def save_settings(self):
+        try:
+            DATA_FILE.write_text(json.dumps(
+                {"servers": [asdict(s) for s in self.servers],
+                 "theme": self.theme,
+                 "auto_check_update": self.auto_check_update},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    # -- رابط ---------------------------------------------------------------
+    def build_ui(self):
         central = QWidget()
-        central.setObjectName("central")
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(12)
+        layout = QVBoxLayout(central)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
 
-        # تیتر
-        title = QLabel("⚡ " + APP_NAME)
+        title = QLabel(APP_NAME)
         title.setObjectName("title")
-        root.addWidget(title)
-        subtitle = QLabel(APP_SUBTITLE + " — روی «اسکن» بزن تا با اینترنت خودت بهترین سرور مشخص شود")
+        title.setAlignment(Qt.AlignCenter)
+        subtitle = QLabel(APP_SUBTITLE)
         subtitle.setObjectName("subtitle")
-        subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
+        subtitle.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
 
-        # بنر پیشنهاد
         self.banner = QLabel("")
         self.banner.setObjectName("banner")
-        self.banner.setWordWrap(True)
-        self.banner.hide()
-        root.addWidget(self.banner)
+        self.banner.setAlignment(Qt.AlignCenter)
+        self.banner.setVisible(False)
+        layout.addWidget(self.banner)
 
-        # جدول
-        self.table = QTableWidget(0, len(COLS))
-        self.table.setHorizontalHeaderLabels(COLS)
+        btn_row = QHBoxLayout()
+        self.scan_btn = QPushButton("⚡ اسکن همه سرورها")
+        self.scan_btn.clicked.connect(self.run_scan)
+        add_btn = QPushButton("＋ افزودن")
+        add_btn.setObjectName("ghost")
+        add_btn.clicked.connect(self.add_server)
+        edit_btn = QPushButton("✎ ویرایش")
+        edit_btn.setObjectName("ghost")
+        edit_btn.clicked.connect(self.edit_server)
+        del_btn = QPushButton("🗑 حذف")
+        del_btn.setObjectName("danger")
+        del_btn.clicked.connect(self.delete_server)
+        import_btn = QPushButton("📥 درون‌ریزی گروهی")
+        import_btn.setObjectName("ghost")
+        import_btn.clicked.connect(self.import_servers)
+        settings_btn = QPushButton("⚙ تنظیمات")
+        settings_btn.setObjectName("ghost")
+        settings_btn.clicked.connect(self.open_settings)
+        for b in (self.scan_btn, add_btn, edit_btn, del_btn, import_btn, settings_btn):
+            btn_row.addWidget(b)
+        layout.addLayout(btn_row)
+
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
+
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(
+            ["سرور", "منطقه", "پینگ", "Packet Loss", "اتصال TCP", "وضعیت"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        root.addWidget(self.table, 1)
+        self.table.setLayoutDirection(Qt.RightToLeft)
+        layout.addWidget(self.table)
 
-        # پیشرفت
-        prog_row = QHBoxLayout()
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.status_label = QLabel("آماده")
-        self.status_label.setObjectName("subtitle")
-        prog_row.addWidget(self.progress, 1)
-        prog_row.addWidget(self.status_label)
-        root.addLayout(prog_row)
+        bottom = QHBoxLayout()
+        self.copy_btn = QPushButton("📋 کپی آدرس RTMP سرور پیشنهادی")
+        self.copy_btn.clicked.connect(self.copy_best)
+        self.copy_btn.setEnabled(False)
+        bottom.addWidget(self.copy_btn)
+        layout.addLayout(bottom)
 
-        # دکمه‌ها
-        btn_row = QHBoxLayout()
-        self.scan_btn = QPushButton("🔍 اسکن همه سرورها")
-        self.scan_btn.setObjectName("scanBtn")
-        self.scan_btn.clicked.connect(self.start_scan)
-        btn_row.addWidget(self.scan_btn)
+    # -- جدول ----------------------------------------------------------------
+    def refresh_table(self):
+        self.table.setRowCount(len(self.servers))
+        for i, s in enumerate(self.servers):
+            self.table.setItem(i, 0, QTableWidgetItem(s.name))
+            self.table.setItem(i, 1, QTableWidgetItem(s.region))
+            r = self.last_results.get(s.id)
+            if r:
+                self.fill_result_row(i, r)
+            else:
+                for c in range(2, 6):
+                    self.table.setItem(i, c, QTableWidgetItem("—"))
 
-        add_btn = QPushButton("➕ افزودن")
-        add_btn.clicked.connect(self.add_server)
-        btn_row.addWidget(add_btn)
+    def fill_result_row(self, i, r):
+        ping_txt = f"{r['ping_ms']:.0f} ms" if r["ping_ms"] is not None else "ناموفق"
+        tcp_txt = f"{r['tcp_ms']:.0f} ms" if r["tcp_ms"] is not None else "قطع"
+        ok_txt = "✅ وصل" if r["ok"] else "❌ قطع"
+        self.table.setItem(i, 2, QTableWidgetItem(ping_txt))
+        self.table.setItem(i, 3, QTableWidgetItem(f"{r['loss']:.0f}%"))
+        self.table.setItem(i, 4, QTableWidgetItem(tcp_txt))
+        item = QTableWidgetItem(ok_txt)
+        item.setForeground(QColor("#00e676") if r["ok"] else QColor("#ff5252"))
+        self.table.setItem(i, 5, item)
 
-        edit_btn = QPushButton("✏️ ویرایش")
-        edit_btn.clicked.connect(self.edit_server)
-        btn_row.addWidget(edit_btn)
-
-        del_btn = QPushButton("🗑 حذف")
-        del_btn.setObjectName("dangerBtn")
-        del_btn.clicked.connect(self.delete_server)
-        btn_row.addWidget(del_btn)
-
-        copy_btn = QPushButton("📋 کپی آدرس RTMP")
-        copy_btn.clicked.connect(self.copy_rtmp)
-        btn_row.addWidget(copy_btn)
-
-        import_btn = QPushButton("📥 درون‌ریزی گروهی")
-        import_btn.clicked.connect(self.import_servers)
-        btn_row.addWidget(import_btn)
-
-        reset_btn = QPushButton("↺ بازنشانی")
-        reset_btn.clicked.connect(self.reset_defaults)
-        btn_row.addWidget(reset_btn)
-
-        btn_row.addStretch()
-        root.addLayout(btn_row)
-
-        hint = QLabel("💡 فقط سرورهای «ایران» برای اتصال شما مناسب‌اند؛ سرورهای اروپا/خروجی را خود مستراستریم مدیریت می‌کند.")
-        hint.setObjectName("hint")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
-
-        self.refresh_table()
-
-    # -- جدول -------------------------------------------------------------
-    def refresh_table(self, order=None):
-        servers = list(self.servers)
-        if order == "score":
-            servers.sort(key=lambda s: (
-                self.results.get(s.id, {}).get("score") is None,
-                self.results.get(s.id, {}).get("score") or 1e9,
-            ))
-        self.table.setRowCount(len(servers))
-        for row, srv in enumerate(servers):
-            res = self.results.get(srv.id, {})
-            status, color = self._status_cell(srv, res)
-            cells = [
-                (status, color),
-                (srv.name, None),
-                (srv.region, None),
-                (srv.host or "—", None),
-                (f"{res['ping']:.0f} ms" if res.get("ping") is not None else "—", None),
-                (f"{res['loss']:.0f}٪" if res.get("loss") is not None else "—", None),
-                (f"{res['tcp']:.0f} ms" if res.get("tcp") is not None else "—", None),
-                (f"{res['score']:.0f}" if res.get("score") is not None else "—", None),
-            ]
-            for col, (text, fg) in enumerate(cells):
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignCenter)
-                item.setData(Qt.UserRole, srv.id)
-                if fg:
-                    item.setForeground(QColor(fg))
-                if col == 0:
-                    font = QFont()
-                    font.setBold(True)
-                    item.setFont(font)
-                self.table.setItem(row, col, item)
-
-    def _status_cell(self, srv, res):
-        if not srv.host.strip():
-            return ("⚪ بدون آدرس", "#9aa0a6")
-        if not res:
-            return ("⚪ تست نشده", "#9aa0a6")
-        if res.get("ok"):
-            return ("🟢 سالم", "#00e676")
-        return ("🔴 قطع", "#ff5252")
-
-    def selected_server(self):
-        row = self.table.currentRow()
-        if row < 0:
-            return None
-        srv_id = self.table.item(row, 0).data(Qt.UserRole)
-        return next((s for s in self.servers if s.id == srv_id), None)
-
-    # -- اسکن --------------------------------------------------------------
-    def start_scan(self):
+    # -- اسکن -----------------------------------------------------------------
+    def run_scan(self):
         if self.scan_thread and self.scan_thread.isRunning():
             return
-        testable = [s for s in self.servers if s.host.strip()]
-        if not testable:
-            QMessageBox.information(self, "اسکن", "هیچ سروری آدرس ندارد! اول آدرس RTMP را از پنل مستراستریم وارد کنید.")
+        if not self.servers:
+            QMessageBox.information(self, "اسکن", "اول چند سرور اضافه کنید.")
             return
-        self.banner.hide()
         self.scan_btn.setEnabled(False)
-        self.scan_btn.setText("⏳ در حال اسکن...")
-        self.results = {}
-
-        self.scan_thread = QThread(self)
-        self.scan_worker = ScanWorker(self.servers)
-        self.scan_worker.moveToThread(self.scan_thread)
-        self.scan_thread.started.connect(self.scan_worker.run)
-        self.scan_worker.progress.connect(self._on_progress)
-        self.scan_worker.server_done.connect(self._on_server_done)
-        self.scan_worker.finished.connect(self._on_scan_finished)
-        self.scan_worker.finished.connect(self.scan_thread.quit)
+        self.copy_btn.setEnabled(False)
+        self.banner.setVisible(False)
+        self.progress.setVisible(True)
+        self.progress.setMaximum(len(self.servers))
+        self.progress.setValue(0)
+        self._done_count = 0
+        snapshot = [asdict(s) for s in self.servers]
+        self.scan_thread = ScanThread(snapshot, self)
+        self.scan_thread.one_done.connect(self.on_one_done)
+        self.scan_thread.all_done.connect(self.on_all_done)
         self.scan_thread.start()
 
-    @Slot(int, str)
-    def _on_progress(self, pct, msg):
-        self.progress.setValue(pct)
-        self.status_label.setText(msg)
-
-    @Slot(str, dict)
-    def _on_server_done(self, srv_id, result):
-        self.results[srv_id] = result
-        self.refresh_table()
-
-    @Slot()
-    def _on_scan_finished(self):
-        self.scan_btn.setEnabled(True)
-        self.scan_btn.setText("🔍 اسکن همه سرورها")
-        self.status_label.setText("تمام شد")
-        self.refresh_table(order="score")
-        self._show_recommendation()
-
-    def _show_recommendation(self):
-        iran = [s for s in self.servers if s.region == REGION_IRAN]
-        ranked = [(s, self.results.get(s.id, {}).get("score"))
-                  for s in iran]
-        ranked = [(s, sc) for s, sc in ranked if sc is not None]
-        if not ranked:
-            self.banner.setText("⚠️ هیچ سرور ایرانی در دسترسی نبود — آدرس‌ها و اینترنت را بررسی کنید.")
-            self.banner.show()
+    @Slot(int, dict)
+    def on_one_done(self, index, result):
+        srv = next((s for s in self.servers if s.id == result.get("id")), None)
+        if srv is None or index >= len(self.servers):
             return
-        ranked.sort(key=lambda x: x[1])
-        best, score = ranked[0]
-        res = self.results[best.id]
-        self.banner.setText(
-            f"🏆 پیشنهاد برای استریم روی Kick: {best.name}\n"
-            f"پینگ {res['ping']:.0f} میلی‌ثانیه • اتصال TCP: {res['tcp']:.0f} میلی‌ثانیه"
-            + (f" • افت بسته: {res['loss']:.0f}٪" if res.get("loss") else "")
-            + "\nاین آدرس را در Meld/OBS به‌عنوان سرور RTMP وارد کنید."
-        )
-        self.banner.show()
+        self.last_results[srv.id] = result
+        self.table.setItem(index, 0, QTableWidgetItem(srv.name))
+        self.table.setItem(index, 1, QTableWidgetItem(srv.region))
+        self.fill_result_row(index, result)
+        self._done_count += 1
+        self.progress.setValue(self._done_count)
 
-    # -- مدیریت سرورها -------------------------------------------------------
+    @Slot(list)
+    def on_all_done(self, results):
+        self.scan_thread = None
+        self.scan_btn.setEnabled(True)
+        self.progress.setVisible(False)
+        ok_results = [r for r in results if r.get("ok")]
+        if not ok_results:
+            QMessageBox.warning(self, "اسکن",
+                                "هیچ سروری وصل نشد. اینترنت یا آدرس‌ها را بررسی کنید.")
+            return
+        best = min(ok_results, key=lambda r: r["score"])
+        srv = next((s for s in self.servers if s.id == best["id"]), None)
+        name = srv.name if srv else best["name"]
+        region = srv.region if srv else best.get("region", "")
+        self.banner.setText(
+            f"🏆 بهترین سرور: {name} ({region}) — "
+            f"پینگ {best['ping_ms']:.0f}ms، اتصال {best['tcp_ms']:.0f}ms")
+        self.banner.setVisible(True)
+        self.copy_btn.setEnabled(True)
+        self._best = best
+
+    def copy_best(self):
+        best = getattr(self, "_best", None)
+        if not best:
+            return
+        url = f"rtmp://{best['host']}:{best['port']}/live"
+        QApplication.clipboard().setText(url)
+        QMessageBox.information(self, "کپی شد",
+                                f"آدرس RTMP کپی شد:\n{url}\n\n"
+                                "در Meld/OBS وارد کنید.")
+
+    # -- مدیریت سرورها ----------------------------------------------------------
+    def selected_server(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.information(self, "انتخاب", "اول یک سرور را انتخاب کنید.")
+            return None
+        return self.servers[rows[0].row()]
+
     def add_server(self):
         dlg = ServerDialog(self)
         if dlg.exec():
             self.servers.append(dlg.get_server())
-            save_servers(self.servers)
+            self.save_settings()
             self.refresh_table()
 
     def edit_server(self):
         srv = self.selected_server()
         if not srv:
-            QMessageBox.information(self, "ویرایش", "اول یک سرور را از جدول انتخاب کنید.")
             return
         dlg = ServerDialog(self, srv)
         if dlg.exec():
             dlg.get_server(srv)
-            save_servers(self.servers)
+            self.save_settings()
             self.refresh_table()
 
     def delete_server(self):
         srv = self.selected_server()
         if not srv:
-            QMessageBox.information(self, "حذف", "اول یک سرور را از جدول انتخاب کنید.")
             return
-        ans = QMessageBox.question(self, "حذف", f"«{srv.name}» حذف شود؟",
-                                   QMessageBox.Yes | QMessageBox.No)
-        if ans == QMessageBox.Yes:
-            self.servers = [s for s in self.servers if s.id != srv.id]
-            self.results.pop(srv.id, None)
-            save_servers(self.servers)
+        if QMessageBox.question(self, "حذف", f"«{srv.name}» حذف شود؟") \
+                == QMessageBox.Yes:
+            self.servers.remove(srv)
+            self.last_results.pop(srv.id, None)
+            self.save_settings()
             self.refresh_table()
 
     def import_servers(self):
@@ -670,45 +810,115 @@ class MainWindow(QMainWindow):
             new = dlg.get_servers()
             if new:
                 self.servers.extend(new)
-                save_servers(self.servers)
+                self.save_settings()
                 self.refresh_table()
                 QMessageBox.information(self, "درون‌ریزی", f"{len(new)} سرور اضافه شد.")
             else:
-                QMessageBox.warning(self, "درون‌ریزی", "خط معتبری پیدا نشد.")
+                QMessageBox.information(self, "درون‌ریزی", "سرور معتبری پیدا نشد.")
 
-    def reset_defaults(self):
-        ans = QMessageBox.question(
-            self, "بازنشانی",
-            "لیست به حالت پیش‌فرض برگردد؟ (تغییرات شما پاک می‌شود)",
-            QMessageBox.Yes | QMessageBox.No)
-        if ans == QMessageBox.Yes:
-            self.servers = default_server_list()
-            self.results = {}
-            self.banner.hide()
-            save_servers(self.servers)
-            self.refresh_table()
+    # -- تنظیمات -----------------------------------------------------------------
+    def open_settings(self):
+        dlg = SettingsDialog(self, self.theme, self.auto_check_update)
+        if dlg.exec():
+            theme, auto = dlg.values()
+            self.theme = theme
+            self.auto_check_update = auto
+            apply_theme(theme)
+            self.save_settings()
 
-    def copy_rtmp(self):
-        srv = self.selected_server()
-        if not srv:
-            QMessageBox.information(self, "کپی", "اول یک سرور را انتخاب کنید.")
-            return
-        text = srv.rtmp_url or (f"rtmp://{srv.host}:{srv.port}/live" if srv.host else "")
-        if not text:
-            QMessageBox.information(self, "کپی", "این سرور آدرسی ندارد.")
-            return
-        QApplication.clipboard().setText(text)
-        self.status_label.setText("✅ آدرس در حافظه کپی شد")
+    # -- آپدیت -------------------------------------------------------------------
+    def check_for_updates(self, manual=False, status_label=None):
+        def worker():
+            try:
+                rel = fetch_latest_release()
+                newer = _ver_tuple(rel.get("tag_name", "0")) > _ver_tuple(__version__)
+            except Exception as e:
+                if manual:
+                    msg = f"خطا در بررسی آپدیت: {e}"
+                    if status_label:
+                        QTimer.singleShot(0, lambda: status_label.setText(msg))
+                    else:
+                        QTimer.singleShot(0, lambda: QMessageBox.warning(
+                            self, "آپدیت", msg))
+                return
+            if newer:
+                QTimer.singleShot(0, lambda: self.update_found.emit(rel))
+                if manual and status_label:
+                    tag = rel.get("tag_name", "")
+                    QTimer.singleShot(0, lambda: status_label.setText(
+                        f"نسخه جدید {tag} موجود است."))
+            elif manual:
+                msg = "شما از آخرین نسخه استفاده می‌کنید. ✅"
+                if status_label:
+                    QTimer.singleShot(0, lambda: status_label.setText(msg))
+                else:
+                    QTimer.singleShot(0, lambda: QMessageBox.information(
+                        self, "آپدیت", msg))
+        threading.Thread(target=worker, daemon=True).start()
 
+    @Slot(dict)
+    def on_update_found(self, release):
+        tag = release.get("tag_name", "")
+        dlg = UpdateDialog(self, release)
+        if dlg.exec():
+            asset = find_setup_asset(release)
+            if not asset:
+                QMessageBox.warning(self, "آپدیت",
+                                    "فایل نصب در این نسخه پیدا نشد.")
+                return
+            self.download_and_install(asset, tag)
 
-# ----------------------------------------------------------------------------
-# اجرا
-# ----------------------------------------------------------------------------
+    def download_and_install(self, asset, tag):
+        url = asset.get("browser_download_url", "")
+        name = asset.get("name", "MasterStreamScanner-Setup.exe")
+        dest = str(Path(tempfile.gettempdir()) / name)
+        prog = QProgressDialog("در حال دانلود نسخه جدید…", "انصراف", 0, 0, self)
+        prog.setWindowModality(Qt.WindowModal)
+        prog.show()
+
+        def worker():
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "MasterStreamScanner"})
+                with urllib.request.urlopen(req, timeout=60) as r, \
+                        open(dest, "wb") as f:
+                    while True:
+                        chunk = r.read(1024 * 256)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            except Exception as e:
+                QTimer.singleShot(0, lambda: (prog.close(), QMessageBox.warning(
+                    self, "آپدیت", f"دانلود ناموفق بود:\n{e}")))
+                return
+            def done():
+                prog.close()
+                if QMessageBox.question(
+                        self, "آپدیت",
+                        f"نسخه {tag} دانلود شد. نصب شود؟\n(برنامه بسته می‌شود)") \
+                        == QMessageBox.Yes:
+                    try:
+                        if sys.platform == "win32":
+                            import os as _os
+                            _os.startfile(dest)  # noqa
+                        else:
+                            QMessageBox.information(
+                                self, "آپدیت", f"فایل نصب:\n{dest}")
+                    finally:
+                        QApplication.quit()
+            QTimer.singleShot(0, done)
+        threading.Thread(target=worker, daemon=True).start()
+
 
 def main():
     app = QApplication(sys.argv)
-    app.setLayoutDirection(Qt.RightToLeft)
     app.setApplicationName(APP_NAME)
+    app.setOrganizationName("MasterStreamScanner")
+    font = QFont("Vazirmatn", 10)
+    if "Vazirmatn" not in QFont().families():
+        font = QFont()
+        font.setPointSize(10)
+    app.setFont(font)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
