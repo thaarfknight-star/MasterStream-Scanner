@@ -4,6 +4,12 @@
 !ifndef VERSION
   !define VERSION "1.0.0"
 !endif
+!ifndef EXE_PATH
+  !define EXE_PATH "dist\MasterStreamScanner.exe"
+!endif
+!ifndef OUT_PATH
+  !define OUT_PATH "installer\MasterStreamScanner-Setup.exe"
+!endif
 
 !include "MUI2.nsh"
 
@@ -11,7 +17,7 @@
 ;   makensis installer/installer.nsi
 
 Name "MasterStream Scanner"
-OutFile "installer\MasterStreamScanner-Setup.exe"
+OutFile "${OUT_PATH}"
 InstallDir "$PROGRAMFILES64\MasterStream Scanner"
 InstallDirRegKey HKLM "Software\MasterStream Scanner" "InstallDir"
 RequestExecutionLevel admin
@@ -39,7 +45,7 @@ VIAddVersionKey "FileDescription" "MasterStream Scanner Setup"
 
 Section "Main" SEC_MAIN
   SetOutPath "$INSTDIR"
-  File "dist\MasterStreamScanner.exe"
+  File "${EXE_PATH}"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\MasterStream Scanner" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MasterStream Scanner" \
