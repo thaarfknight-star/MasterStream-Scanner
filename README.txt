@@ -1,9 +1,9 @@
-اسکنر سرور مستراستریم — راهنمای اجرا
+StreamScanner — راهنمای اجرا
 ========================================
 
 اجرا:
   1) pip install PySide6
-  2) python masterstream_scanner.py
+  2) python streamscanner.py
 
 اولین قدم مهم:
   آدرس دقیق سرورها (هاست RTMP) عمومی نیست و فقط داخل «پنل کاربری
