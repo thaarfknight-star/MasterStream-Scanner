@@ -41,7 +41,9 @@ jobs:
         run: |
           $ver = "${{ github.ref_name }}".TrimStart("v")
           if (-not $ver -or $ver -eq "main") { $ver = "1.0.0" }
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION=$ver installer/installer.nsi
+          $exePath = Join-Path $env:GITHUB_WORKSPACE "dist\MasterStreamScanner.exe"
+          $outPath = Join-Path $env:GITHUB_WORKSPACE "installer\MasterStreamScanner-Setup.exe"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
