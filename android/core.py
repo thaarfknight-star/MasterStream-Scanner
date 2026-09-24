@@ -26,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-__version__ = "1.0.2"
+__version__ = "1.0.4"
 GITHUB_OWNER = "thaarfknight-star"
 GITHUB_REPO = "StreamScanner"
 ANDROID_TAG_PREFIX = "android-v"
