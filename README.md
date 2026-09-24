@@ -1,7 +1,7 @@
-# MasterStream Scanner
+# StreamScanner
 
-![Build](https://github.com/thaarfknight-star/MasterStream-Scanner/actions/workflows/build.yml/badge.svg)
-![Latest release](https://img.shields.io/github/v/release/thaarfknight-star/MasterStream-Scanner)
+![Build](https://github.com/thaarfknight-star/StreamScanner/actions/workflows/build.yml/badge.svg)
+![Latest release](https://img.shields.io/github/v/release/thaarfknight-star/StreamScanner)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 
@@ -35,8 +35,8 @@ then ranks them and recommends the best one for your Kick stream.
 
 ## Download & Install
 
-Download the latest **`MasterStreamScanner-Setup.exe`** from the
-[Releases page](https://github.com/thaarfknight-star/MasterStream-Scanner/releases)
+Download the latest **`StreamScanner-Setup.exe`** from the
+[Releases page](https://github.com/thaarfknight-star/StreamScanner/releases)
 and run it. No Python or extra dependencies needed.
 
 ## Usage
@@ -59,7 +59,7 @@ If a newer version exists, it offers to download and install it automatically.
 
 ```bash
 pip install -r requirements.txt
-python masterstream_scanner.py
+python streamscanner.py
 ```
 
 The Windows installer is built by GitHub Actions (`.github/workflows/build.yml`):
