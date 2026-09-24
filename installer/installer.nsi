@@ -10,6 +10,9 @@
 !ifndef OUT_PATH
   !define OUT_PATH "installer\StreamScanner-Setup.exe"
 !endif
+!ifndef ICON_PATH
+  !define ICON_PATH "assets\icon.ico"
+!endif
 
 !include "MUI2.nsh"
 
@@ -30,8 +33,8 @@ VIAddVersionKey "LegalCopyright" "thaarfknight-star"
 VIAddVersionKey "FileDescription" "StreamScanner Setup"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "assets\icon.ico"
-!define MUI_UNICON "assets\icon.ico"
+!define MUI_ICON "${ICON_PATH}"
+!define MUI_UNICON "${ICON_PATH}"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
