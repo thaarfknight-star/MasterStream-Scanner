@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# MasterStream Scanner — Copyright (c) 2026 thaarfknight-star. All rights reserved.
+# Source-available, NOT open-source: viewing permitted; copying, modification,
+# redistribution or reuse prohibited without written permission. See LICENSE.
 """
 اسکنر سرور مستراستریم | MasterStream Server Scanner
 ====================================================
