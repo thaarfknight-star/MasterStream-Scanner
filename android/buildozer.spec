@@ -16,7 +16,7 @@ source.dir = .
 source.include_exts = py,png,json,ttf
 
 # (str) Application version — patched from the android-v* tag by CI
-version = 1.0.2
+version = 1.0.4
 
 # (list) Application requirements
 # kivy: UI | pyjnius: clipboard + PackageInstaller | plyer: clipboard fallback
@@ -54,7 +54,7 @@ android.ndk = 25b
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # patched from the android-v* tag by CI so in-app updates install cleanly
-android.numeric_version = 102
+android.numeric_version = 104
 
 # (list) Android architectures: arm64-v8a covers all modern phones and
 # halves the CI build time.
