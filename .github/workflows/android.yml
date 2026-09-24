@@ -1,0 +1,103 @@
+name: Android APK
+
+# فقط روی تگ‌های android-v* اجرا می‌شود تا با ورک‌فلوی ویندوز (تگ‌های v*) قاطی نشود
+on:
+  push:
+    tags:
+      - 'android-v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          REF="${GITHUB_REF#refs/tags/}"
+          if [[ "$REF" == android-v* ]]; then
+            VER="${REF#android-v}"
+          else
+            VER="1.0.2"
+            REF="android-v$VER"
+          fi
+          NUM=$(echo "$VER" | awk -F. '{printf "%d", $1*10000+$2*100+$3}')
+          echo "REF=$REF VER=$VER NUM=$NUM"
+          echo "REF=$REF" >> $GITHUB_ENV
+          echo "VER=$VER" >> $GITHUB_ENV
+          sed -i "s/^version = .*/version = $VER/" android/buildozer.spec
+          sed -i "s/^android.numeric_version = .*/android.numeric_version = $NUM/" android/buildozer.spec
+          sed -i "s/^__version__ = .*/__version__ = \"$VER\"/" android/core.py
+          grep -E '^version = ' android/buildozer.spec
+          grep -E '^android.numeric_version = ' android/buildozer.spec
+          grep -E '^__version__ = ' android/core.py
+
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-android-${{ hashFiles('android/buildozer.spec') }}
+          restore-keys: |
+            buildozer-android-
+
+      - name: Cache Android debug keystore
+        # نگه‌داشتن کلید دیباگ بین بیلدها تا امضای همه APKها یکسان بماند
+        # و آپدیت درون‌برنامه‌ای بدون حذف/نصب مجدد کار کند
+        uses: actions/cache@v4
+        with:
+          path: ~/.android
+          key: android-debug-keystore-v1
+
+      - name: Verify Android SDK integrity
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          if [ -d "$SDK" ] && [ ! -f "$SDK/tools/bin/sdkmanager" ]; then
+            echo "Cached SDK is incomplete (no sdkmanager) -> removing for a clean re-download"
+            rm -rf "$SDK"
+          else
+            echo "SDK cache looks OK"
+          fi
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
+            autoconf libtool pkg-config zlib1g-dev libncurses5-dev \
+            libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev automake
+
+      - name: Install Buildozer
+        run: |
+          pip3 install --upgrade pip
+          pip3 install "cython==0.29.33" buildozer
+          buildozer --version
+
+      - name: Build APK
+        working-directory: android
+        run: buildozer android debug
+
+      - name: Rename APK
+        run: |
+          ls -la android/bin/
+          cp android/bin/*.apk android/bin/StreamScanner-Android.apk
+          ls -la android/bin/StreamScanner-Android.apk
+
+      - name: Publish GitHub Release with APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES="نسخه اندروید StreamScanner ${VER}
+          فایل StreamScanner-Android.apk را دانلود و روی گوشی نصب کنید.
+          (برای نصب، «نصب برنامه‌های ناشناس» را برای مرورگر/برنامه مجاز کنید)
+
+          StreamScanner Android ${VER} — download StreamScanner-Android.apk and install it on your phone."
+          if gh release view "$REF" >/dev/null 2>&1; then
+            gh release upload "$REF" --clobber android/bin/StreamScanner-Android.apk
+          else
+            gh release create "$REF" --title "StreamScanner Android $VER" \
+              --notes "$NOTES" android/bin/StreamScanner-Android.apk
+          fi
+          gh release view "$REF"
