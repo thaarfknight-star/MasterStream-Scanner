@@ -288,6 +288,15 @@ class PillButton(ButtonBehavior, BGBox):
         self.repaint()
 
 
+class FaOptionButton(Button):
+    """گزینه‌های بازشوی Spinner با فونت فارسی (رفع باگ مربع‌مربع شدن متن)."""
+
+    def __init__(self, **kw):
+        kw.setdefault("font_name", FONT)
+        kw.setdefault("font_size", sp(15))
+        super().__init__(**kw)
+
+
 class ServerRow(ButtonBehavior, BGBox):
     """یک ردیف کارتی سرور: نام + برچسب منطقه + خط وضعیت."""
 
@@ -1180,7 +1189,7 @@ class StreamScannerApp(App):
         sp_ = Spinner(text=text, values=values, font_name=FONT,
                       font_size=sp(size), background_normal="",
                       background_down="", size_hint_y=None,
-                      height=dp(height))
+                      height=dp(height), option_cls=FaOptionButton)
         self.paint_spinner(sp_)
         return sp_
 
