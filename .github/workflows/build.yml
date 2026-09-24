@@ -1,13 +1,16 @@
-name: Build Windows EXE
+name: Build
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -22,11 +25,38 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --onefile --noconsole --name MasterStreamScanner masterstream_scanner.py
+        run: pyinstaller --onefile --noconsole --name MasterStreamScanner masterstream_scanner.py
 
-      - name: Upload EXE
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          makensis -VERSION
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          if (-not $ver -or $ver -eq "main") { $ver = "1.0.0" }
+          makensis /DVERSION=$ver installer/installer.nsi
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MasterStreamScanner-win64
-          path: dist/MasterStreamScanner.exe
+          name: MasterStreamScanner-${{ github.ref_name }}
+          path: |
+            dist/MasterStreamScanner.exe
+            installer/MasterStreamScanner-Setup.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "installer/MasterStreamScanner-Setup.exe" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
