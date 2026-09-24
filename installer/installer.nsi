@@ -7,11 +7,11 @@
 
 !include "MUI2.nsh"
 
-; همه مسیرها نسبت به پوشه همین اسکریپت
-!define SCRIPT_DIR `${__FILEDIR__}`
+; این اسکریپت از روت ریپو اجرا می‌شود:
+;   makensis installer/installer.nsi
 
 Name "MasterStream Scanner"
-OutFile "${SCRIPT_DIR}\MasterStreamScanner-Setup.exe"
+OutFile "installer\MasterStreamScanner-Setup.exe"
 InstallDir "$PROGRAMFILES64\MasterStream Scanner"
 InstallDirRegKey HKLM "Software\MasterStream Scanner" "InstallDir"
 RequestExecutionLevel admin
@@ -39,7 +39,7 @@ VIAddVersionKey "FileDescription" "MasterStream Scanner Setup"
 
 Section "Main" SEC_MAIN
   SetOutPath "$INSTDIR"
-  File "${SCRIPT_DIR}\..\dist\MasterStreamScanner.exe"
+  File "dist\MasterStreamScanner.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\MasterStream Scanner" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MasterStream Scanner" \
