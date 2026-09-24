@@ -1,5 +1,7 @@
 # StreamScanner
 
+<p align="center"><img src="assets/icon.png" width="128" alt="StreamScanner logo"></p>
+
 ![Build](https://github.com/thaarfknight-star/StreamScanner/actions/workflows/build.yml/badge.svg)
 ![Latest release](https://img.shields.io/github/v/release/thaarfknight-star/StreamScanner)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
@@ -27,15 +29,20 @@ then ranks them and recommends the best one for your Kick stream.
 - ⚡ **Parallel scan** — all servers probed at the same time, no console windows
 - 🔍 **Auto-detect** — paste an RTMP link and the server name + region are filled in automatically
 - 🏆 **Smart ranking** — best server recommendation based on latency, packet loss and TCP connect time
-- 🎨 **Themes** — dark, light, or follow the system
-- 🔔 **Auto-update** — checks GitHub releases and installs new versions in-app
+- 🎨 **9 Themes** — dark, light, system + midnight, emerald, sunset, amethyst,
+  ocean and rose; applied instantly from Settings
+- 🌐 **Bilingual** — full Persian (RTL) / English interface, switchable in Settings
+- 🔔 **Auto-update** — checks GitHub releases; download the portable **update file**
+  or the full **installer**, your choice
 - 📥 **Bulk import** — paste many servers at once (`name | rtmp://host:1935/live`)
-- 📋 **One-click copy** — copy the recommended server's RTMP address for Meld / OBS
+- 📋 **One-click copy** — copy the recommended server's RTMP address for Meld / OBS;
+  double-click any row to copy that server's address
 - 🇮🇷 Persian RTL interface
 
 ## Download & Install
 
-Download the latest **`StreamScanner-Setup.exe`** from the
+Download the latest **`StreamScanner-Setup.exe`** (full installer) or
+**`StreamScanner-Portable.exe`** (portable, no install) from the
 [Releases page](https://github.com/thaarfknight-star/StreamScanner/releases)
 and run it. No Python or extra dependencies needed.
 
