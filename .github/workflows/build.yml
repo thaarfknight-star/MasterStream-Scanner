@@ -30,11 +30,21 @@ jobs:
       - name: Ensure NSIS is available
         shell: pwsh
         run: |
-          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $nsis)) {
-            choco install nsis -y --no-progress
+          $candidates = @(
+            "C:\Program Files (x86)\NSIS\makensis.exe",
+            "C:\Program Files\NSIS\makensis.exe"
+          )
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            Write-Host "NSIS not preinstalled; installing via winget..."
+            winget install --id NSIS.NSIS -e --silent --accept-package-agreements --accept-source-agreements
+            if ($LASTEXITCODE -ne 0) { throw "winget install NSIS failed (exit $LASTEXITCODE)" }
+            $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           }
-          & $nsis -VERSION
+          if (-not $exe) { throw "makensis.exe not found after install attempt" }
+          Write-Host "Using makensis: $exe"
+          & $exe /VERSION
+          (Split-Path $exe) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build installer
         shell: pwsh
@@ -43,7 +53,7 @@ jobs:
           if (-not $ver -or $ver -eq "main") { $ver = "1.0.0" }
           $exePath = Join-Path $env:GITHUB_WORKSPACE "dist\MasterStreamScanner.exe"
           $outPath = Join-Path $env:GITHUB_WORKSPACE "installer\MasterStreamScanner-Setup.exe"
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi
+          makensis /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
