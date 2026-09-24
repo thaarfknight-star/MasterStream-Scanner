@@ -79,4 +79,9 @@ PyInstaller → NSIS setup → GitHub Release (triggered by `v*` tags).
 
 ## License
 
-TBD — the project is published with full source; a license file will be added shortly.
+This project is **source-available, not open-source**. The source code is
+published for transparency and reference only — copying, modification,
+redistribution, or reuse is prohibited without prior written permission.
+See the [LICENSE](LICENSE) file for the full terms.
+
+Copyright (c) 2026 thaarfknight-star. All rights reserved.
