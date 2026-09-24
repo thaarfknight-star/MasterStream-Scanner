@@ -13,6 +13,9 @@
 !ifndef ICON_PATH
   !define ICON_PATH "assets\icon.ico"
 !endif
+!ifndef HEADERBMP_PATH
+  !define HEADERBMP_PATH "assets\header.bmp"
+!endif
 
 !include "MUI2.nsh"
 
@@ -36,7 +39,7 @@ VIAddVersionKey "FileDescription" "StreamScanner Setup"
 !define MUI_ICON "${ICON_PATH}"
 !define MUI_UNICON "${ICON_PATH}"
 !define MUI_HEADERIMAGE
-!define MUI_HEADERIMAGE_BITMAP "assets\header.bmp"
+!define MUI_HEADERIMAGE_BITMAP "${HEADERBMP_PATH}"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
