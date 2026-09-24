@@ -68,8 +68,10 @@ jobs:
           $outPath = Join-Path $env:GITHUB_WORKSPACE "installer\StreamScanner-Setup.exe"
           $portablePath = Join-Path $env:GITHUB_WORKSPACE "installer\StreamScanner-Portable.exe"
           Copy-Item $exePath $portablePath
+          $iconPath = Join-Path $env:GITHUB_WORKSPACE "assets\icon.ico"
+          Write-Host "icon: $iconPath (exists: $(Test-Path $iconPath))"
           Write-Host "exe: $exePath (exists: $(Test-Path $exePath))"
-          & $mk /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi 2>&1 | Tee-Object -FilePath $log
+          & $mk /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" "/DICON_PATH=$iconPath" installer/installer.nsi 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "makensis exited with code $LASTEXITCODE (see makensis.log artifact)" }
 
       - name: Upload build log
