@@ -21,11 +21,13 @@ version = 1.0.2
 # (list) Application requirements
 # kivy: UI | pyjnius: clipboard + PackageInstaller | plyer: clipboard fallback
 # arabic-reshaper + python-bidi: Persian text shaping in Kivy
-# NOTE: charset-normalizer is pinned to 3.4.x because 3.5.0+ ships android-tagged
-# wheels on PyPI and python-for-android then tries to install that wheel with the
-# HOST pip ("not a supported wheel on this platform") -> build failure.
-# (charset-normalizer comes in transitively via kivy's python_depends -> requests)
-requirements = python3,kivy,pyjnius,plyer,arabic-reshaper,python-bidi,charset-normalizer==3.4.9
+# NOTE: charset-normalizer must stay below 3.5: 3.5.0+ ships android-tagged wheels
+# on PyPI and python-for-android then fails with "not a supported wheel on this
+# platform" when installing with the HOST pip. (It comes in transitively via
+# kivy's python_depends -> requests.) IMPORTANT: use "<=" and NOT "==" here —
+# p4a's toolchain strips "==x.y.z" pins from requirements (they only apply to
+# recipes), so "==" would silently resolve back to 3.5.x and break the build.
+requirements = python3,kivy,pyjnius,plyer,arabic-reshaper,python-bidi,charset-normalizer<=3.4.9
 
 # (str) Supported orientations: landscape, portrait, sensor, all ...
 orientation = portrait
