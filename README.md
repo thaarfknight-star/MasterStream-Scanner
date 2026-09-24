@@ -31,13 +31,12 @@ then ranks them and recommends the best one for your Kick stream.
 - 🏆 **Smart ranking** — best server recommendation based on latency, packet loss and TCP connect time
 - 🎨 **9 Themes** — dark, light, system + midnight, emerald, sunset, amethyst,
   ocean and rose; applied instantly from Settings
-- 🌐 **Bilingual** — full Persian (RTL) / English interface, switchable in Settings
+- 🌐 **Persian-only** — کاملاً فارسی (راست‌به‌چپ)
 - 🔔 **Auto-update** — checks GitHub releases; download the portable **update file**
   or the full **installer**, your choice
 - 📥 **Bulk import** — paste many servers at once (`name | rtmp://host:1935/live`)
 - 📋 **One-click copy** — copy the recommended server's RTMP address for Meld / OBS;
   double-click any row to copy that server's address
-- 🇮🇷 Persian RTL interface
 
 ## Download & Install
 
