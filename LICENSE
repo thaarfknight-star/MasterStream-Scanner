@@ -1,4 +1,4 @@
-MasterStream Scanner — Source-Available License
+StreamScanner — Source-Available License
 Copyright (c) 2026 thaarfknight-star. All rights reserved.
 
 The source code of this project is published for transparency and
@@ -15,7 +15,7 @@ PROHIBITED
     - decompile or reverse-engineer the distributed builds to obtain
       reusable source beyond what is published here.
 
-  Running the official distributed builds (e.g. MasterStreamScanner-Setup.exe
+  Running the official distributed builds (e.g. StreamScanner-Setup.exe
   from the project's GitHub Releases) for their intended purpose is allowed.
 
 NO WARRANTY
