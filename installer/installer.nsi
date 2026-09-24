@@ -35,6 +35,8 @@ VIAddVersionKey "FileDescription" "StreamScanner Setup"
 !define MUI_ABORTWARNING
 !define MUI_ICON "${ICON_PATH}"
 !define MUI_UNICON "${ICON_PATH}"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "assets\header.bmp"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -76,13 +78,14 @@ SectionEnd
 Section "Start Menu Shortcuts"
   CreateDirectory "$SMPROGRAMS\StreamScanner"
   CreateShortcut "$SMPROGRAMS\StreamScanner\StreamScanner.lnk" \
-                 "$INSTDIR\StreamScanner.exe"
+                 "$INSTDIR\StreamScanner.exe" "" "$INSTDIR\StreamScanner.exe" 0
   CreateShortcut "$SMPROGRAMS\StreamScanner\Uninstall.lnk" \
                  "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "Desktop Shortcut"
-  CreateShortcut "$DESKTOP\StreamScanner.lnk" "$INSTDIR\StreamScanner.exe"
+  CreateShortcut "$DESKTOP\StreamScanner.lnk" "$INSTDIR\StreamScanner.exe" \
+                 "" "$INSTDIR\StreamScanner.exe" 0
 SectionEnd
 
 Section "Uninstall"
