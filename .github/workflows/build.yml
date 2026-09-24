@@ -49,11 +49,34 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          $log = Join-Path $env:GITHUB_WORKSPACE "makensis.log"
+          function Find-Makensis {
+            $c = @("C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe")
+            $f = $c | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($f) { return $f }
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return $null
+          }
+          $mk = Find-Makensis
+          if (-not $mk) { throw "makensis.exe not found" }
+          Write-Host "makensis: $mk"
           $ver = "${{ github.ref_name }}".TrimStart("v")
           if (-not $ver -or $ver -eq "main") { $ver = "1.0.0" }
+          Write-Host "version: $ver"
           $exePath = Join-Path $env:GITHUB_WORKSPACE "dist\MasterStreamScanner.exe"
           $outPath = Join-Path $env:GITHUB_WORKSPACE "installer\MasterStreamScanner-Setup.exe"
-          makensis /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi
+          Write-Host "exe: $exePath (exists: $(Test-Path $exePath))"
+          & $mk /DVERSION=$ver "/DEXE_PATH=$exePath" "/DOUT_PATH=$outPath" installer/installer.nsi 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "makensis exited with code $LASTEXITCODE (see makensis.log artifact)" }
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: makensis-log-${{ github.ref_name }}
+          path: makensis.log
+          if-no-files-found: warn
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
